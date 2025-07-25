@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Street Walker</title>
+    <style>
+        body { margin: 0; overflow: hidden; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        #error { 
+            position: absolute; 
+            top: 10px; 
+            left: 10px; 
+            color: red; 
+            font-family: Arial, sans-serif; 
+            background: rgba(255, 255, 255, 0.8); 
+            padding: 10px; 
+            display: none; 
+        }
+        #controls {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+        }
+        .control-btn {
+            padding: 10px 20px;
+            margin: 0 5px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        .control-btn:hover {
+            background: rgba(0, 0, 0, 0.9);
+        }
+    </style>
+</head>
+<body>
+    <div id="error"></div>
+    <div id="controls">
+        <button class="control-btn" id="forward">Forward</button>
+        <button class="control-btn" id="backward">Backward</button>
+    </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    <script>
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x000022); 
+
+        const starGeometry = new THREE.BufferGeometry();
+        const starCount = 2000;
+        const starPositions = new Float32Array(starCount * 3);
+        for (let i = 0; i < starCount * 3; i += 3) {
+            starPositions[i] = (Math.random() - 0.5) * 2000;
+            starPositions[i + 1] = (Math.random() - 0.5) * 2000;
+            starPositions[i + 2] = (Math.random() - 0.5) * 2000;
+        }
+        starGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
+        const starMaterial = new THREE.PointsMaterial({ color: 0xffffff, size: 2 });
+        const stars = new THREE.Points(starGeometry, starMaterial);
+        scene.add(stars);
+
+        const camera = new THREE.PerspectiveCamera(90, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0.001, 0.5, 0);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        const ambientLight = new THREE.AmbientLight(0x6666aa, 0.6); 
+        scene.add(ambientLight);
+        const directionalLight = new THREE.DirectionalLight(0xaaaaaa, 0.8); 
+        directionalLight.position.set(1, 1, 1);
+        scene.add(directionalLight);
+        const streetLight = new THREE.PointLight(0xffffaa, 1.0, 50); 
+        streetLight.position.set(0, 2, 0);
+        scene.add(streetLight);
+
+        const loader = new THREE.GLTFLoader();
+        const streetModels = [];
+        const tileSize = 20;
+        const tiles = 3;
+
+        function loadStreetModel(zOffset) {
+            loader.load(
+                'https://6lj.github.io/3DWEB/model.glb',
+                (gltf) => {
+                    const model = gltf.scene;
+                    model.rotation.x = Math.PI / 2;
+                    model.rotation.z = Math.PI;
+                    const box = new THREE.Box3().setFromObject(model);
+                    const center = box.getCenter(new THREE.Vector3());
+                    const size = box.getSize(new THREE.Vector3());
+                    const maxDim = Math.max(size.x, size.y, size.z);
+                    const scale = 2 / maxDim;
+                    model.scale.set(scale, scale, scale);
+                    model.position.sub(center.multiplyScalar(scale));
+                    model.position.z += zOffset;
+                    scene.add(model);
+                    streetModels.push({ model, zOffset });
+                },
+                (xhr) => {
+                    console.log((xhr.loaded / xhr.total * 100) + '% loaded');
+                },
+                (error) => {
+                    console.error('Error loading model:', error);
+                    const errorDiv = document.getElementById('error');
+                    errorDiv.style.display = 'block';
+                    errorDiv.innerText = 'Error loading model: ' + error.message;
+                }
+            );
+        }
+
+        for (let i = -tiles; i <= tiles; i++) {
+            loadStreetModel(i * tileSize);
+        }
+
+        let yaw = 0;
+        let pitch = 5.0;
+        camera.rotation.set(pitch, yaw, 0);
+        const sensitivity = 0.006;
+        document.addEventListener('mousemove', (event) => {
+            if (document.pointerLockElement === renderer.domElement) {
+                yaw -= event.movementX * sensitivity;
+                pitch -= event.movementY * sensitivity;
+                pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, pitch));
+                camera.rotation.set(pitch, yaw, 0);
+            }
+        });
+
+        renderer.domElement.addEventListener('click', () => {
+            renderer.domElement.requestPointerLock();
+        });
+
+        const keys = {};
+        const moveSpeed = 0.1;
+        let movingForward = false;
+        let movingBackward = false;
+
+        document.addEventListener('keydown', (event) => { keys[event.code] = true; });
+        document.addEventListener('keyup', (event) => { keys[event.code] = false; });
+
+        const forwardBtn = document.getElementById('forward');
+        const backwardBtn = document.getElementById('backward');
+        forwardBtn.addEventListener('mousedown', () => { movingForward = true; });
+        forwardBtn.addEventListener('mouseup', () => { movingForward = false; });
+        backwardBtn.addEventListener('mousedown', () => { movingBackward = true; });
+        backwardBtn.addEventListener('mouseup', () => { movingBackward = false; });
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const direction = new THREE.Vector3();
+            const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+            const right = new THREE.Vector3().crossVectors(camera.up, forward).normalize();
+
+            if (keys['KeyW'] || movingForward) direction.add(forward);
+            if (keys['KeyS'] || movingBackward) direction.sub(forward);
+            if (keys['KeyA']) direction.sub(right);
+            if (keys['KeyD']) direction.add(right);
+
+            if (direction.length() > 0) {
+                direction.normalize().multiplyScalar(moveSpeed);
+                camera.position.add(direction);
+            }
+
+            streetModels.forEach(({ model, zOffset }) => {
+                if (camera.position.z > zOffset + tileSize) {
+                    model.position.z += tileSize * (tiles * 2 + 1);
+                } else if (camera.position.z < zOffset - tileSize) {
+                    model.position.z -= tileSize * (tiles * 2 + 1);
+                }
+            });
+
+            camera.position.x = Math.max(-10, Math.min(10, camera.position.x));
+            camera.position.y = Math.max(0, Math.min(1, camera.position.y));
+
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
